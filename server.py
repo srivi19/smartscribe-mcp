@@ -27,16 +27,7 @@ from tools.to_fhir_bundle import to_fhir_bundle as _to_fhir_bundle
 # Server setup
 # ──────────────────────────────────────────────
 
-mcp = FastMCP(
-    "SmartScribe",
-    description=(
-        "AI Clinical Note Generator & FHIR Writer — transform messy "
-        "clinician-patient transcripts into structured SOAP notes with "
-        "auto-suggested medical codes (ICD-10, SNOMED CT, CPT) and "
-        "FHIR R4-compliant resources. Built for the Prompt Opinion "
-        "healthcare AI platform."
-    ),
-)
+mcp = FastMCP("SmartScribe")
 
 
 # ──────────────────────────────────────────────
