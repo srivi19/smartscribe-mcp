@@ -165,8 +165,8 @@ async def to_fhir_bundle(
 # ──────────────────────────────────────────────
 
 if __name__ == "__main__":
-    port = int(os.environ.get("SMARTSCRIBE_PORT", 8000))
+    port = int(os.environ.get("PORT", os.environ.get("SMARTSCRIBE_PORT", 8000)))
     print(f"Starting SmartScribe MCP Server on port {port}...")
     print(f"MCP endpoint: http://localhost:{port}/mcp")
     print(f"Tools: generate_note, extract_codes, to_fhir_bundle")
-    mcp.run(transport="streamable-http", port=port)
+    mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
