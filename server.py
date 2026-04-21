@@ -10,15 +10,16 @@ Exposes 3 tools:
 
 Run:
   python server.py
-
-Test with MCP Inspector:
-  fastmcp dev server.py
 """
 
 import os
 import json
+import uvicorn
 from fastmcp import FastMCP
+from starlette.applications import Starlette
+from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
+from starlette.routing import Mount
 
 from tools.generate_note import generate_note as _generate_note
 from tools.extract_codes import extract_codes as _extract_codes
@@ -29,13 +30,6 @@ from tools.to_fhir_bundle import to_fhir_bundle as _to_fhir_bundle
 # ──────────────────────────────────────────────
 
 mcp = FastMCP("SmartScribe")
-
-mcp.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 # ──────────────────────────────────────────────
@@ -138,17 +132,6 @@ async def to_fhir_bundle(
     3. Builds FHIR R4 resources (Encounter, DocumentReference, Conditions)
     4. Packages them into a transaction Bundle ready for an EHR
 
-    Use this when you want the full pipeline — from messy notes to
-    FHIR-ready output — in a single tool call.
-
-    The Bundle includes:
-    - 1 Encounter resource (the clinical visit)
-    - 1 DocumentReference (the full SOAP note)
-    - N Condition resources (one per identified diagnosis)
-
-    All resources are tagged as "ai-generated" and Conditions are
-    set to "provisional" verification status.
-
     Args:
         transcript: Raw clinical encounter text.
         patient_id: FHIR Patient resource ID to reference.
@@ -169,6 +152,27 @@ async def to_fhir_bundle(
 
 
 # ──────────────────────────────────────────────
+# Wrap with CORS using Starlette directly
+# ──────────────────────────────────────────────
+
+def create_app():
+    mcp_app = mcp.http_app(path="/mcp")
+
+    app = Starlette(
+        routes=[Mount("/", app=mcp_app)],
+        middleware=[
+            Middleware(
+                CORSMiddleware,
+                allow_origins=["*"],
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+        ],
+    )
+    return app
+
+
+# ──────────────────────────────────────────────
 # Entry point
 # ──────────────────────────────────────────────
 
@@ -177,4 +181,6 @@ if __name__ == "__main__":
     print(f"Starting SmartScribe MCP Server on port {port}...")
     print(f"MCP endpoint: http://localhost:{port}/mcp")
     print(f"Tools: generate_note, extract_codes, to_fhir_bundle")
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
+
+    app = create_app()
+    uvicorn.run(app, host="0.0.0.0", port=port)
