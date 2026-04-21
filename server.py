@@ -18,6 +18,7 @@ Test with MCP Inspector:
 import os
 import json
 from fastmcp import FastMCP
+from starlette.middleware.cors import CORSMiddleware
 
 from tools.generate_note import generate_note as _generate_note
 from tools.extract_codes import extract_codes as _extract_codes
@@ -28,6 +29,13 @@ from tools.to_fhir_bundle import to_fhir_bundle as _to_fhir_bundle
 # ──────────────────────────────────────────────
 
 mcp = FastMCP("SmartScribe")
+
+mcp.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ──────────────────────────────────────────────
