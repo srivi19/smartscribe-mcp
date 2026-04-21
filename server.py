@@ -3,10 +3,13 @@ SmartScribe MCP Server
 ======================
 AI Clinical Note Generator & FHIR Writer for the Prompt Opinion platform.
 
+Uses the official Anthropic MCP SDK with json_response=True for
+browser compatibility and Prompt Opinion integration.
+
 Exposes 3 tools:
-  - generate_note:   Raw transcript → structured SOAP note
-  - extract_codes:   Clinical text → ICD-10, SNOMED CT, CPT codes
-  - to_fhir_bundle:  Raw transcript → complete FHIR R4 Bundle (end-to-end)
+  - generate_note:   Raw transcript -> structured SOAP note
+  - extract_codes:   Clinical text -> ICD-10, SNOMED CT, CPT codes
+  - to_fhir_bundle:  Raw transcript -> complete FHIR R4 Bundle
 
 Run:
   python server.py
@@ -14,12 +17,7 @@ Run:
 
 import os
 import json
-import uvicorn
-from fastmcp import FastMCP
-from starlette.applications import Starlette
-from starlette.middleware import Middleware
-from starlette.middleware.cors import CORSMiddleware
-from starlette.routing import Mount
+from mcp.server.fastmcp import FastMCP
 
 from tools.generate_note import generate_note as _generate_note
 from tools.extract_codes import extract_codes as _extract_codes
@@ -27,9 +25,11 @@ from tools.to_fhir_bundle import to_fhir_bundle as _to_fhir_bundle
 
 # ──────────────────────────────────────────────
 # Server setup
+# json_response=True returns plain JSON instead of SSE streams
+# This makes it work with browsers and Prompt Opinion
 # ──────────────────────────────────────────────
 
-mcp = FastMCP("SmartScribe")
+mcp = FastMCP("SmartScribe", json_response=True)
 
 
 # ──────────────────────────────────────────────
@@ -47,31 +47,27 @@ async def generate_note(
     Transform a raw clinician-patient transcript or bullet-point notes
     into a properly structured SOAP clinical note.
 
-    Use this tool when a clinician has rough notes, a conversation
-    transcript, or bullet points from a patient encounter and needs
-    them converted into a formal clinical note.
-
-    The output includes Subjective, Objective, Assessment, and Plan
-    sections formatted according to clinical documentation standards.
-
-    IMPORTANT: This tool uses AI and produces SYNTHETIC output only.
-    All generated notes must be reviewed by a licensed clinician.
-
     Args:
-        transcript: Raw encounter text — conversation, bullet points,
+        transcript: Raw encounter text - conversation, bullet points,
                     or rough notes from a clinical encounter.
-        note_type: Clinical specialty context — "general", "cardiology",
-                   "oncology", "psychiatry", "pediatrics", "orthopedics".
-        patient_age: Patient age in years (helps with clinical context).
-        patient_sex: Patient sex — "male" or "female" (helps with context).
+        note_type: Clinical specialty - general, cardiology, oncology,
+                   psychiatry, pediatrics, orthopedics.
+        patient_age: Patient age in years.
+        patient_sex: Patient sex - male or female.
     """
-    result = await _generate_note(
-        transcript=transcript,
-        note_type=note_type,
-        patient_age=patient_age,
-        patient_sex=patient_sex,
-    )
-    return json.dumps(result, indent=2)
+    print(f"[generate_note] called with note_type={note_type}", flush=True)
+    try:
+        result = await _generate_note(
+            transcript=transcript,
+            note_type=note_type,
+            patient_age=patient_age,
+            patient_sex=patient_sex,
+        )
+        print(f"[generate_note] success", flush=True)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        print(f"[generate_note] ERROR: {e}", flush=True)
+        raise
 
 
 # ──────────────────────────────────────────────
@@ -85,28 +81,21 @@ async def extract_codes(
     """
     Extract and suggest medical codes from any clinical text.
 
-    Analyzes clinical documentation and suggests appropriate:
-    - ICD-10-CM diagnosis codes
-    - SNOMED CT clinical finding codes
-    - CPT procedure/E&M codes
-
-    Each code includes a confidence level (high/medium/low) and
-    the specific context from the text that supports it.
-
-    Use this tool after generating a note, or on any existing
-    clinical text that needs coding.
-
-    IMPORTANT: These are AI suggestions only. A certified medical
-    coder should verify all codes before use in billing.
+    Suggests ICD-10-CM diagnosis codes, SNOMED CT clinical finding
+    codes, and CPT procedure codes with confidence levels.
 
     Args:
-        clinical_text: Any clinical text — a SOAP note, transcript,
+        clinical_text: Any clinical text - SOAP note, transcript,
                        discharge summary, or clinical narrative.
     """
-    result = await _extract_codes(
-        clinical_text=clinical_text,
-    )
-    return json.dumps(result, indent=2)
+    print(f"[extract_codes] called", flush=True)
+    try:
+        result = await _extract_codes(clinical_text=clinical_text)
+        print(f"[extract_codes] success", flush=True)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        print(f"[extract_codes] ERROR: {e}", flush=True)
+        raise
 
 
 # ──────────────────────────────────────────────
@@ -126,50 +115,32 @@ async def to_fhir_bundle(
     End-to-end pipeline: transform a raw clinical transcript into a
     complete FHIR R4 transaction Bundle.
 
-    This tool does everything in one call:
-    1. Generates a structured SOAP note from the transcript
-    2. Extracts ICD-10, SNOMED CT, and CPT codes
-    3. Builds FHIR R4 resources (Encounter, DocumentReference, Conditions)
-    4. Packages them into a transaction Bundle ready for an EHR
+    Generates a SOAP note, extracts codes, and builds FHIR R4
+    resources in one call.
 
     Args:
         transcript: Raw clinical encounter text.
-        patient_id: FHIR Patient resource ID to reference.
-        practitioner_id: FHIR Practitioner resource ID to reference.
-        note_type: Clinical specialty — "general", "cardiology", etc.
+        patient_id: FHIR Patient resource ID.
+        practitioner_id: FHIR Practitioner resource ID.
+        note_type: Clinical specialty.
         patient_age: Patient age in years.
-        patient_sex: Patient sex — "male" or "female".
+        patient_sex: Patient sex - male or female.
     """
-    result = await _to_fhir_bundle(
-        transcript=transcript,
-        patient_id=patient_id,
-        practitioner_id=practitioner_id,
-        note_type=note_type,
-        patient_age=patient_age,
-        patient_sex=patient_sex,
-    )
-    return json.dumps(result, indent=2)
-
-
-# ──────────────────────────────────────────────
-# Wrap with CORS using Starlette directly
-# ──────────────────────────────────────────────
-
-def create_app():
-    mcp_app = mcp.http_app(path="/mcp")
-
-    app = Starlette(
-        routes=[Mount("/", app=mcp_app)],
-        middleware=[
-            Middleware(
-                CORSMiddleware,
-                allow_origins=["*"],
-                allow_methods=["*"],
-                allow_headers=["*"],
-            )
-        ],
-    )
-    return app
+    print(f"[to_fhir_bundle] called with note_type={note_type}", flush=True)
+    try:
+        result = await _to_fhir_bundle(
+            transcript=transcript,
+            patient_id=patient_id,
+            practitioner_id=practitioner_id,
+            note_type=note_type,
+            patient_age=patient_age,
+            patient_sex=patient_sex,
+        )
+        print(f"[to_fhir_bundle] success", flush=True)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        print(f"[to_fhir_bundle] ERROR: {e}", flush=True)
+        raise
 
 
 # ──────────────────────────────────────────────
@@ -178,9 +149,17 @@ def create_app():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", os.environ.get("SMARTSCRIBE_PORT", 8000)))
-    print(f"Starting SmartScribe MCP Server on port {port}...")
-    print(f"MCP endpoint: http://localhost:{port}/mcp")
-    print(f"Tools: generate_note, extract_codes, to_fhir_bundle")
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
-    app = create_app()
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    print(f"Starting SmartScribe MCP Server on port {port}...", flush=True)
+    print(f"MCP endpoint: http://0.0.0.0:{port}/mcp", flush=True)
+    print(f"Tools: generate_note, extract_codes, to_fhir_bundle", flush=True)
+    print(f"ANTHROPIC_API_KEY: {'SET' if api_key else 'MISSING!'}", flush=True)
+    print(f"Response mode: JSON (not SSE)", flush=True)
+
+    mcp.run(
+        transport="streamable-http",
+        host="0.0.0.0",
+        port=port,
+        path="/mcp",
+    )
